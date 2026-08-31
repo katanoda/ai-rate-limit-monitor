@@ -1,0 +1,14 @@
+{
+  "name": "limit-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Claude Code / Codex CLI のレートリミット(5時間・週次)をブラウザで一覧表示するローカル監視アプリ",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

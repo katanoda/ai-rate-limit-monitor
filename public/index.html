@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Limit Monitor</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <h1>Limit Monitor</h1>
+  <p class="updated" id="updated">読み込み中...</p>
+</header>
+
+<main>
+  <div class="grid" id="grid">
+    <div class="grid-header">
+      <div class="col-label"></div>
+      <div class="col-title">5時間制限</div>
+      <div class="col-title">週次制限</div>
+    </div>
+    <div class="row" data-provider="claude">
+      <div class="col-label">Claude Code</div>
+      <div class="col-cell" data-slot="fiveHour"></div>
+      <div class="col-cell" data-slot="weekly"></div>
+    </div>
+    <div class="row" data-provider="codex">
+      <div class="col-label">Codex CLI</div>
+      <div class="col-cell" data-slot="fiveHour"></div>
+      <div class="col-cell" data-slot="weekly"></div>
+    </div>
+    <div class="row" data-provider="gemini">
+      <div class="col-label">Gemini (Antigravity)</div>
+      <div class="col-cell" data-slot="fiveHour"></div>
+      <div class="col-cell" data-slot="weekly"></div>
+    </div>
+  </div>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
