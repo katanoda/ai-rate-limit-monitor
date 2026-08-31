@@ -1,1 +1,13 @@
 node_modules/
+
+# secrets / credentials (should never live in this repo)
+.env
+.env.*
+*credentials*.json
+auth.json
+*.pem
+*.key
+
+# local session/runtime state
+.claude/
+*.log
