@@ -55,9 +55,31 @@ function renderNote(cell, text, isError) {
   cell.appendChild(note);
 }
 
+function renderSourceNote(row, status) {
+  const labelCell = row.querySelector(".col-label");
+  let noteEl = labelCell.querySelector(".source-note");
+  const text = [status?.note, status?.asOf ? `(${formatJst(status.asOf)}時点)` : null]
+    .filter(Boolean)
+    .join(" ");
+
+  if (!text) {
+    if (noteEl) noteEl.remove();
+    return;
+  }
+
+  if (!noteEl) {
+    noteEl = document.createElement("div");
+    noteEl.className = "source-note";
+    labelCell.appendChild(noteEl);
+  }
+  noteEl.textContent = text;
+}
+
 function renderProvider(row, status) {
   const fiveHourCell = row.querySelector('[data-slot="fiveHour"]');
   const weeklyCell = row.querySelector('[data-slot="weekly"]');
+
+  renderSourceNote(row, status);
 
   if (!status) {
     renderNote(fiveHourCell, "データ取得待ち...", false);

@@ -7,10 +7,15 @@ export function getCache() {
   return state;
 }
 
+export function setResult(result) {
+  state = {
+    updatedAt: new Date().toISOString(),
+    providers: { ...state.providers, [result.provider]: result },
+  };
+}
+
 export function setResults(results) {
-  const providers = {};
   for (const result of results) {
-    providers[result.provider] = result;
+    setResult(result);
   }
-  state = { updatedAt: new Date().toISOString(), providers };
 }

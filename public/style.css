@@ -141,3 +141,10 @@ main {
   font-size: 0.85rem;
   color: var(--danger);
 }
+
+.source-note {
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-weight: 400;
+}

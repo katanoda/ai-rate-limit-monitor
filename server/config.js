@@ -13,3 +13,11 @@ export const CODEX_AUTH_PATH = path.join(
   process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
   "auth.json",
 );
+
+// Claude Desktopアプリが自身の表示用に5〜15分間隔で書き出している使用率ログ。
+// ここから読むだけならAnthropicへの追加アクセスが発生しない。
+export const CLAUDE_DESKTOP_USAGE_PATH = path.join(
+  process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"),
+  "Claude",
+  "plan-usage-history.json",
+);
