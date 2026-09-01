@@ -4,6 +4,9 @@ import { okStatus, errorStatus } from "./types.js";
 import { setResult } from "../cache.js";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const REFRESH_URL = "https://console.anthropic.com/v1/oauth/token";
+const REFRESH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const EXP_SKEW_MS = 60_000;
 
 // Anthropicの使用量APIは429時にRetry-Afterヘッダーを返す(実測で1000秒超)ことがあるため、
 // それを最優先で使う。無い場合のみヒューリスティックな指数バックオフにフォールバックする。
@@ -20,12 +23,53 @@ let nextAttemptAt = 0;
 // 表示が「取得できていません」という汎用メッセージに化けてしまうため、モジュールで保持する。
 let lastError = null;
 
-async function readAccessToken() {
+async function readCredentials() {
   const raw = await fs.readFile(CLAUDE_CREDENTIALS_PATH, "utf8");
-  const parsed = JSON.parse(raw);
-  const token = parsed?.claudeAiOauth?.accessToken;
-  if (!token) throw new Error("claudeAiOauth.accessToken が資格情報ファイルに見つかりません");
-  return token;
+  return JSON.parse(raw);
+}
+
+function isExpired(oauth) {
+  if (!oauth?.expiresAt) return false;
+  return Date.now() >= oauth.expiresAt - EXP_SKEW_MS;
+}
+
+// アクセストークンが期限切れの場合、refreshTokenを使ってconsole.anthropic.comから
+// 新しいトークンを取得し、資格情報ファイルに書き戻す(claude CLI自身の挙動と同じ)。
+async function refreshAndPersist(credentials) {
+  const oauth = credentials.claudeAiOauth || {};
+  const refreshToken = oauth.refreshToken;
+  if (!refreshToken) throw new Error("claudeAiOauth.refreshToken が資格情報ファイルに見つかりません");
+
+  const res = await fetch(REFRESH_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: REFRESH_CLIENT_ID,
+    }),
+  });
+  if (!res.ok) throw new Error(`Claude トークンリフレッシュが ${res.status} を返しました`);
+  const refreshed = await res.json();
+  if (!refreshed.access_token) throw new Error("Claude トークンリフレッシュ結果に access_token がありません");
+
+  oauth.accessToken = refreshed.access_token;
+  if (refreshed.refresh_token) oauth.refreshToken = refreshed.refresh_token;
+  if (refreshed.expires_in) oauth.expiresAt = Date.now() + refreshed.expires_in * 1000;
+  if (refreshed.scope) oauth.scopes = refreshed.scope.split(" ");
+  credentials.claudeAiOauth = oauth;
+  await fs.writeFile(CLAUDE_CREDENTIALS_PATH, `${JSON.stringify(credentials, null, 2)}\n`);
+  return oauth;
+}
+
+async function readAccessToken() {
+  const credentials = await readCredentials();
+  let oauth = credentials.claudeAiOauth;
+  if (!oauth?.accessToken) throw new Error("claudeAiOauth.accessToken が資格情報ファイルに見つかりません");
+  if (isExpired(oauth) && oauth.refreshToken) {
+    oauth = await refreshAndPersist(credentials);
+  }
+  return oauth.accessToken;
 }
 
 // Retry-Afterヘッダーは秒数、またはHTTP-date形式で来る。どちらもパースを試みる。
@@ -38,9 +82,8 @@ function parseRetryAfterMs(res) {
   return Number.isNaN(asDate) ? null : asDate - Date.now();
 }
 
-async function fetchDirectUsage() {
-  const token = await readAccessToken();
-  const res = await fetch(USAGE_URL, {
+async function callUsageApi(token) {
+  return fetch(USAGE_URL, {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
@@ -48,6 +91,23 @@ async function fetchDirectUsage() {
       "User-Agent": "limit-monitor/1.0",
     },
   });
+}
+
+async function fetchDirectUsage() {
+  let token = await readAccessToken();
+  let res = await callUsageApi(token);
+
+  // expiresAtの誤差などでトークンがまだ有効と判定されていた場合の保険として、
+  // 401が返ってきたら一度だけリフレッシュしてリトライする。
+  if (res.status === 401) {
+    const credentials = await readCredentials();
+    if (credentials.claudeAiOauth?.refreshToken) {
+      const oauth = await refreshAndPersist(credentials);
+      token = oauth.accessToken;
+      res = await callUsageApi(token);
+    }
+  }
+
   if (!res.ok) {
     const err = new Error(`Anthropic usage API が ${res.status} を返しました`);
     err.status = res.status;
