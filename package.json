@@ -6,9 +6,14 @@
   "type": "module",
   "main": "server/index.js",
   "scripts": {
-    "start": "node --watch server/index.js"
+    "start": "node --watch server/index.js",
+    "service:install": "node scripts/service.js install",
+    "service:uninstall": "node scripts/service.js uninstall"
   },
   "dependencies": {
     "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "node-windows": "^1.0.0-beta.8"
   }
 }

@@ -11,3 +11,6 @@ auth.json
 # local session/runtime state
 .claude/
 *.log
+
+# node-windows が生成するサービスラッパー
+daemon/
