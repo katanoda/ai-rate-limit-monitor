@@ -12,6 +12,8 @@ const EXP_SKEW_MS = 60_000;
 // それを最優先で使う。無い場合のみヒューリスティックな指数バックオフにフォールバックする。
 const MIN_BACKOFF_MS = 10_000;
 const MAX_BACKOFF_MS = 30 * 60_000;
+// トークンリフレッシュ失敗(主に429)時は、短間隔の再試行がレート制限を長引かせるため最低待機を長くする。
+const MIN_REFRESH_BACKOFF_MS = 5 * 60_000;
 
 // 直近で判明している「最良の」使用量データ。APIから直接取れなくても、
 // Claude Desktopアプリのログや前回の成功結果があればこれを表示し続ける。
@@ -49,7 +51,14 @@ async function refreshAndPersist(credentials) {
       client_id: REFRESH_CLIENT_ID,
     }),
   });
-  if (!res.ok) throw new Error(`Claude トークンリフレッシュが ${res.status} を返しました`);
+  if (!res.ok) {
+    // ステータスとRetry-Afterを保持し、呼び出し側のバックオフに反映できるようにする
+    const err = new Error(`Claude トークンリフレッシュが ${res.status} を返しました`);
+    err.status = res.status;
+    err.retryAfterMs = parseRetryAfterMs(res);
+    err.isRefresh = true;
+    throw err;
+  }
   const refreshed = await res.json();
   if (!refreshed.access_token) throw new Error("Claude トークンリフレッシュ結果に access_token がありません");
 
@@ -62,12 +71,27 @@ async function refreshAndPersist(credentials) {
   return oauth;
 }
 
+// 更新に失敗した場合、claude CLI / Desktop など別プロセスが先にトークンを更新して
+// refreshTokenを使い回し不可にした(400/401)可能性がある。資格情報ファイルを読み直し、
+// 有効なトークンが書き込まれていればそれを使う。
+async function refreshOrReuse(credentials) {
+  try {
+    return await refreshAndPersist(credentials);
+  } catch (err) {
+    const latest = (await readCredentials().catch(() => null))?.claudeAiOauth;
+    if (latest?.accessToken && !isExpired(latest) && latest.accessToken !== credentials.claudeAiOauth?.accessToken) {
+      return latest;
+    }
+    throw err;
+  }
+}
+
 async function readAccessToken() {
   const credentials = await readCredentials();
   let oauth = credentials.claudeAiOauth;
   if (!oauth?.accessToken) throw new Error("claudeAiOauth.accessToken が資格情報ファイルに見つかりません");
   if (isExpired(oauth) && oauth.refreshToken) {
-    oauth = await refreshAndPersist(credentials);
+    oauth = await refreshOrReuse(credentials);
   }
   return oauth.accessToken;
 }
@@ -102,7 +126,7 @@ async function fetchDirectUsage() {
   if (res.status === 401) {
     const credentials = await readCredentials();
     if (credentials.claudeAiOauth?.refreshToken) {
-      const oauth = await refreshAndPersist(credentials);
+      const oauth = await refreshOrReuse(credentials);
       token = oauth.accessToken;
       res = await callUsageApi(token);
     }
@@ -166,7 +190,8 @@ function buildResult() {
 
   let note = null;
   if (lastError) {
-    const status = lastError.status ?? "?";
+    const code = lastError.status ?? "?";
+    const status = lastError.isRefresh ? `トークン更新 ${code}` : code;
     const via = lastGood.source === "api" ? "前回API取得値" : "Claude Desktopログ由来の値";
     const retryNote =
       nextAttemptAt > Date.now() ? ` (次回再試行: ${new Date(nextAttemptAt).toLocaleTimeString("ja-JP")})` : "";
@@ -199,9 +224,10 @@ async function tick() {
     } catch (err) {
       lastError = err;
       // サーバーがRetry-Afterを返していればそれを最優先で使う。無ければ指数バックオフ。
+      const minBackoff = err.isRefresh ? MIN_REFRESH_BACKOFF_MS : MIN_BACKOFF_MS;
       backoffMs = Number.isFinite(err.retryAfterMs)
-        ? Math.min(Math.max(err.retryAfterMs, MIN_BACKOFF_MS), MAX_BACKOFF_MS)
-        : Math.min(backoffMs ? backoffMs * 2 : MIN_BACKOFF_MS, MAX_BACKOFF_MS);
+        ? Math.min(Math.max(err.retryAfterMs, minBackoff), MAX_BACKOFF_MS)
+        : Math.min(backoffMs ? Math.max(backoffMs * 2, minBackoff) : minBackoff, MAX_BACKOFF_MS);
       nextAttemptAt = now + backoffMs;
     }
   }
